@@ -18,7 +18,8 @@ Each path may be a file or a directory. Directories are walked recursively for `
 | `-v`, `--version` | Print version. |
 | `--json` | Emit machine-readable output: exactly one JSON object on stdout and nothing else (no colors, no extra logs). |
 | `--fail-on <level>` | Set the exit code based on findings. See levels below. |
-| `--diff [base]` | Scan only files that git reports as changed versus `base` (default `main`). |
+| `--diff` | Scan only files that git reports as changed versus the base ref. |
+| `--diff-base <ref>` | Base ref for `--diff` (default `main`). Requires `--diff`. |
 
 #### `--json`
 
@@ -77,16 +78,19 @@ $ echo $?
 
 `--fail-on` composes with `--json`: the exit code is still set from the findings count while stdout stays a single JSON object.
 
-#### `--diff [base]`
+#### `--diff` / `--diff-base <ref>`
 
-Restricts the scan to `.tsx`/`.jsx` files that git reports as changed versus a base ref (default `main`), respecting the same ignored-directory rules as a directory walk. Pass a base ref after the flag to compare against it instead:
+Restricts the scan to `.tsx`/`.jsx` files that git reports as changed versus a base ref (default `main`), respecting the same ignored-directory rules as a directory walk. Use `--diff-base <ref>` to compare against a different ref:
 
 ```
-$ react-driller --diff            # changed files vs main
-$ react-driller --diff develop    # changed files vs develop
+$ react-driller --diff                      # changed files vs main
+$ react-driller --diff --diff-base develop  # changed files vs develop
+$ react-driller --diff src/                 # changed files under src/
 ```
 
-If positional paths are also given, the changed set is intersected with those paths (only changed files under the given roots are scanned). If git is unavailable, the directory is not a git repository, or the base ref is invalid, react-driller prints a clear error to stderr and exits `1`.
+`--diff` and the base ref are separate flags on purpose: a positional argument after `--diff` is a path root (intersected with the changed set), never the base ref, so `react-driller --diff src/` scans changed files under `src/` rather than silently treating `src/` as a ref. git always reports paths relative to the repository root, so `--diff` works from any subdirectory.
+
+If positional paths are also given, the changed set is intersected with those paths (only changed files under the given roots are scanned). If git is unavailable, the directory is not a git repository, or the base ref is invalid, react-driller prints a clear error to stderr and exits `1`. Passing `--diff-base` without `--diff` is a usage error.
 
 ### Gate a commit with husky + lint-staged
 

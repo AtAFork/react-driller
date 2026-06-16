@@ -60,14 +60,15 @@ function printHelp() {
   console.log(`    -v, --version       print version`);
   console.log(`    --json              emit one JSON object on stdout, nothing else`);
   console.log(`    --fail-on <level>   exit code policy: ${FAIL_ON_LEVELS.join(" | ")} (default none)`);
-  console.log(`    --diff [base]       scan only files changed vs base (default ${DEFAULT_DIFF_BASE})`);
+  console.log(`    --diff              scan only files changed vs the base ref`);
+  console.log(`    --diff-base <ref>   base ref for --diff (default ${DEFAULT_DIFF_BASE})`);
   console.log();
   console.log(`  ${bold("examples")}`);
   console.log(`    ${dim("react-driller src/")}`);
   console.log(`    ${dim("react-driller src/app.tsx src/components/")}`);
   console.log(`    ${dim("react-driller --json src/ > report.json")}`);
   console.log(`    ${dim("react-driller --fail-on findings src/")}`);
-  console.log(`    ${dim("react-driller --diff develop")}`);
+  console.log(`    ${dim("react-driller --diff --diff-base develop src/")}`);
   console.log();
 }
 
@@ -102,6 +103,19 @@ function collectFiles(rawPaths: string[]): string[] {
   return [...new Set(files)];
 }
 
+function gitRepoRoot(): string {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    console.error(`${red("error")} not a git repository (or git is unavailable)`);
+    console.error(`${dim("--diff needs to run inside a git working tree")}`);
+    process.exit(1);
+  }
+}
+
 function gitChangedFiles(base: string): string[] {
   try {
     const out = execFileSync(
@@ -121,8 +135,16 @@ function gitChangedFiles(base: string): string[] {
 }
 
 function collectChangedFiles(base: string, roots: string[]): string[] {
+  const repoRoot = gitRepoRoot();
   const changed = gitChangedFiles(base);
-  const relevant = filterChangedFiles(changed, roots);
+  // git emits paths relative to the repo root, not the cwd. Re-express them as
+  // cwd-relative so they share a frame with the user-supplied roots and with
+  // the final resolve below; otherwise any invocation from a subdirectory
+  // silently resolves to non-existent paths and reports nothing found.
+  const cwdRelative = changed.map((rel) =>
+    path.relative(process.cwd(), path.resolve(repoRoot, rel)),
+  );
+  const relevant = filterChangedFiles(cwdRelative, roots);
   const absolute = relevant
     .map((rel) => path.resolve(process.cwd(), rel))
     .filter((abs) => fs.existsSync(abs));
@@ -166,11 +188,14 @@ function parseArgs(argv: string[]): ParsedArgs {
       i += 1;
     } else if (arg === "--diff") {
       diff = true;
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("-")) {
-        diffBase = next;
-        i += 1;
+    } else if (arg === "--diff-base") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        console.error(`${red("error")} --diff-base requires a git ref (e.g. main, origin/main, HEAD~1)`);
+        process.exit(1);
       }
+      diffBase = value;
+      i += 1;
     } else if (arg.startsWith("-")) {
       console.error(`${red("error")} unknown flag: ${dim(arg)}`);
       console.error(`${dim("run `react-driller --help` for usage")}`);
@@ -196,6 +221,12 @@ if (argv.includes("-v") || argv.includes("--version")) {
 }
 
 const { json, failOn, diff, diffBase, paths } = parseArgs(argv);
+
+if (!diff && diffBase !== DEFAULT_DIFF_BASE) {
+  console.error(`${red("error")} --diff-base requires --diff`);
+  console.error(`${dim("run `react-driller --help` for usage")}`);
+  process.exit(1);
+}
 
 let files: string[];
 if (diff) {

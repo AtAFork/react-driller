@@ -1,7 +1,12 @@
+import path from "node:path";
 import { describe, expect, it } from "bun:test";
 
 const DRILLING_FIXTURE = "e2e/1-simple/app.tsx";
 const COLOCATED_FIXTURE = "e2e/4-colocated/app.tsx";
+
+// Absolute path to the CLI entry so tests can run it from any cwd (the --diff
+// repo-root regression below spawns from a subdirectory).
+const CLI_ENTRY = path.resolve(process.cwd(), "src/cli.ts");
 
 // Built from parts so the literal home-directory prefix never appears in this
 // committed source (PII guard) while still asserting output carries no such prefix.
@@ -11,9 +16,9 @@ const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 type CliRun = { code: number; stdout: string; stderr: string };
 
-async function runCli(args: string[]): Promise<CliRun> {
-  const proc = Bun.spawn(["bun", "src/cli.ts", ...args], {
-    cwd: process.cwd(),
+async function runCli(args: string[], cwd = process.cwd()): Promise<CliRun> {
+  const proc = Bun.spawn(["bun", CLI_ENTRY, ...args], {
+    cwd,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -98,19 +103,60 @@ describe("cli default text output is preserved", () => {
 
 describe("cli --diff", () => {
   it("is recognized as a flag rather than rejected as unknown", async () => {
-    const { stderr } = await runCli(["--diff", "main", "e2e/"]);
+    const { stderr } = await runCli(["--diff", "e2e/"]);
     expect(stripAnsi(stderr)).not.toContain("unknown flag");
   });
 
   it("composes with --json and yields valid JSON", async () => {
-    const { code, stdout } = await runCli(["--json", "--diff", "main"]);
+    const { code, stdout } = await runCli(["--json", "--diff"]);
     expect(code).toBe(0);
     expect(() => JSON.parse(stdout.trim())).not.toThrow();
   });
 
-  it("exits 1 with a clear error when the base ref is invalid", async () => {
-    const { code, stderr } = await runCli(["--diff", "totally-bogus-ref-xyz123"]);
+  it("treats a positional arg after --diff as a path root, not the base ref", async () => {
+    // Regression: the old greedy `--diff [base]` form swallowed `e2e/` as the
+    // base ref and scanned nothing. With split flags it is a path root.
+    const { stderr } = await runCli(["--diff", "e2e/"]);
+    expect(stripAnsi(stderr)).not.toContain("could not run git diff");
+    expect(stripAnsi(stderr)).not.toContain("not found");
+  });
+
+  it("exits 1 with a clear error when --diff-base is an invalid ref", async () => {
+    const { code, stderr } = await runCli(["--diff", "--diff-base", "totally-bogus-ref-xyz123"]);
     expect(code).toBe(1);
     expect(stripAnsi(stderr)).toContain("could not run git diff");
+  });
+
+  it("exits 1 when --diff-base is given without --diff", async () => {
+    const { code, stderr } = await runCli(["--diff-base", "develop", "e2e/"]);
+    expect(code).toBe(1);
+    expect(stripAnsi(stderr)).toContain("--diff-base requires --diff");
+  });
+
+  it("exits 1 when --diff-base has no value", async () => {
+    const { code, stderr } = await runCli(["--diff", "--diff-base"]);
+    expect(code).toBe(1);
+    expect(stripAnsi(stderr)).toContain("--diff-base requires a git ref");
+  });
+
+  it("intersects the changed set with a file root (regression for <= vs <)", async () => {
+    // The maintainer's repro: a root that is a full file path must be kept.
+    // COLOCATED_FIXTURE is a new file versus the default base, so it appears
+    // in the changed set and survives intersection with its own path.
+    const { code, stdout } = await runCli(["--json", "--diff", COLOCATED_FIXTURE]);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout.trim());
+    expect(parsed.summary.filesScanned).toBeGreaterThanOrEqual(1);
+  });
+
+  it("resolves git's repo-root-relative paths when run from a subdirectory", async () => {
+    // Regression for comment #1: git emits repo-root-relative paths, so running
+    // --diff from a subdirectory must still find changed files. The old code
+    // resolved against cwd and reported nothing.
+    const subdir = path.join(process.cwd(), "e2e");
+    const { code, stdout } = await runCli(["--json", "--diff"], subdir);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout.trim());
+    expect(parsed.summary.filesScanned).toBeGreaterThanOrEqual(1);
   });
 });

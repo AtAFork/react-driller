@@ -30,7 +30,10 @@ function fallsUnderIgnoredDir(segments: string[]): boolean {
 function isUnderRoot(fileSegments: string[], root: string): boolean {
   const rootSegments = segmentsOf(root);
   if (rootSegments.length === 0) return true;
-  if (fileSegments.length <= rootSegments.length) return false;
+  // `<` (not `<=`): equal length is the root-is-the-file case (e.g. a root of
+  // `src/App.tsx` matching the changed file `src/App.tsx`), which must be kept.
+  // The segment compare below still rejects prefix accidents like `srcfoo`.
+  if (fileSegments.length < rootSegments.length) return false;
   return rootSegments.every(
     (segment, index) => fileSegments[index] === segment,
   );

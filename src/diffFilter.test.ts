@@ -38,6 +38,27 @@ describe("filterChangedFiles", () => {
     expect(result).toEqual([]);
   });
 
+  it("keeps a file whose root is the file's full path (<= vs < regression)", () => {
+    const result = filterChangedFiles(
+      ["e2e/4-colocated/app.tsx"],
+      ["e2e/4-colocated/app.tsx"],
+    );
+    expect(result).toEqual(["e2e/4-colocated/app.tsx"]);
+  });
+
+  it("drops a file when the root is deeper than the file path", () => {
+    const result = filterChangedFiles(["src/App.tsx"], ["src/App.tsx/nested"]);
+    expect(result).toEqual([]);
+  });
+
+  it("matches a file-path root only for that exact file, not siblings", () => {
+    const result = filterChangedFiles(
+      ["src/App.tsx", "src/Other.tsx"],
+      ["src/App.tsx"],
+    );
+    expect(result).toEqual(["src/App.tsx"]);
+  });
+
   it("with empty roots keeps any non-ignored .tsx/.jsx regardless of directory", () => {
     const result = filterChangedFiles(
       ["anywhere/deep/Comp.tsx", "top.jsx"],
