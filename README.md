@@ -163,7 +163,8 @@ And your agent can fix it
 thanks for checking it out <3
 
 ## What doesn't work yet and is on roadmap (0.1.0)
-
+- Custom hooks (shipping rn)
+- Spread props
 - Barrel re-exports (`export { Foo } from "./foo"`)
 - Default exports, esp. wrapped (`export default memo(Foo)`, `forwardRef`)
 - Namespaced JSX (`<motion.div>`)
